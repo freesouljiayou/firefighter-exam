@@ -3,6 +3,8 @@ import json
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from PIL import Image 
+import io
+from fpdf import FPDF # 匯出 PDF 需使用
 
 # ==========================================
 # 0. 網頁基礎設定
@@ -75,7 +77,6 @@ def check_password():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # ✅ 修改需求 1：更改標題名稱
         st.header("🔒 升等考 刑法與消防法規 - 雲端版")
         
         try:
@@ -107,7 +108,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 3. 題庫主程式
+# 3. 核心邏輯與載入資料
 # ==========================================
 
 if 'favorites' not in st.session_state:
@@ -126,7 +127,64 @@ except FileNotFoundError:
     st.error("❌ 找不到 questions.json 檔案！")
     st.stop()
 
-# --- 側邊欄 ---
+# ==========================================
+# 4. PDF 匯出功能函數
+# ==========================================
+def create_pdf(questions, title):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    try:
+        pdf.add_font('ChineseFont', '', 'font.ttf')
+        pdf.set_font('ChineseFont', '', 12)
+    except:
+        return None
+
+    # 標題
+    pdf.set_font_size(16)
+    pdf.cell(0, 10, title, ln=True, align='C')
+    pdf.ln(5)
+    
+    # 內容設定
+    pdf.set_font_size(11)
+    
+    for idx, q in enumerate(questions):
+        # 1. 檢查剩餘空間，如果快到底部了就換頁 (預防題目被切斷)
+        if pdf.get_y() > 250:
+            pdf.add_page()
+
+        # 2. 寫入題目
+        q_year = q.get('year', '')
+        q_id = str(q.get('id', ''))
+        q_content = q.get('question', '')
+        question_text = f"{idx + 1}. [{q_year}#{q_id[-2:]}] {q_content}"
+        pdf.multi_cell(0, 7, question_text) # 降低行高至 7
+        
+        # 3. 逐一寫入選項 (解決版型跑掉的關鍵)
+        options = q.get('options', [])
+        pdf.ln(1) # 題目與選項間微小間隔
+        for opt in options:
+            pdf.set_x(15) # 左側縮排 15mm
+            # 使用 multi_cell 確保單個選項太長時也會自動在縮排範圍內換行
+            pdf.multi_cell(0, 7, opt) 
+        
+        # 4. 寫入正解 (放在選項下方，稍微留白)
+        pdf.ln(1)
+        pdf.set_x(15)
+        pdf.set_text_color(150, 150, 150) # 灰色
+        ans = q.get('answer', '')
+        pdf.cell(0, 7, f"👉 正解: ({ans})", ln=True)
+        pdf.set_text_color(0, 0, 0) # 恢復黑色
+        
+        pdf.ln(5) # 題與題之間的間距
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # 畫一條淡淡的分隔線 (可選)
+        pdf.ln(5)
+
+    return bytes(pdf.output())
+
+# ==========================================
+# 5. 側邊欄與篩選邏輯
+# ==========================================
 st.sidebar.header(f"👤 {st.session_state['username']} 的戰情室")
 
 if st.sidebar.button("💾 手動雲端存檔"):
@@ -136,16 +194,11 @@ if st.sidebar.button("💾 手動雲端存檔"):
 keyword = st.sidebar.text_input("🔍 搜尋關鍵字")
 st.sidebar.markdown("---")
 
-# ==================================================
-# ✅ 修改需求 2：解決頁面跳動的核心邏輯
-# ==================================================
-
-# 1. 定義固定的「內部代碼」 (這些是電腦看的，永遠不會變)
+# --- 修正版 Radio 按鈕邏輯 (解決跳頁問題) ---
 MODE_NORMAL = "normal"
 MODE_FAV = "fav"
 MODE_MIS = "mis"
 
-# 2. 定義「翻譯機」函數 (負責把代碼變成我們要的文字+數字)
 def format_mode_option(option_key):
     if option_key == MODE_NORMAL:
         return "一般刷題"
@@ -155,23 +208,12 @@ def format_mode_option(option_key):
         return f"❌ 錯題複習 ({len(st.session_state['mistakes'])})"
     return option_key
 
-# 3. 建立 Radio 按鈕
-# 注意：options 這裡放的是固定的代碼 [MODE_NORMAL, MODE_FAV, MODE_MIS]
-# format_func 負責顯示文字，key 負責鎖定狀態
-# ==================================================
-# 修正版 Radio 按鈕邏輯 (解決跳頁問題)
-# ==================================================
-
-# 1. 確保 session_state 中有一個獨立變數來記錄當前模式
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = MODE_NORMAL
 
-# 2. 定義 Callback：當使用者「手動」點擊 Radio 時，更新變數
 def on_mode_change():
     st.session_state.view_mode = st.session_state.mode_selector_ui
 
-# 3. 計算目前的 index
-# 這是關鍵！即使文字標籤變了，只要 index 指向同一個位置，它就不會跳掉
 options = [MODE_NORMAL, MODE_FAV, MODE_MIS]
 try:
     current_index = options.index(st.session_state.view_mode)
@@ -179,23 +221,25 @@ except ValueError:
     current_index = 0
     st.session_state.view_mode = MODE_NORMAL
 
-# 4. 建立 Radio
-# 注意：這裡的 key 改名為 _ui，只負責介面互動，邏輯判斷依賴 st.session_state.view_mode
-mode = st.sidebar.radio(
+# 建立 Radio
+mode_selection = st.sidebar.radio(
     "模式", 
     options, 
     format_func=format_mode_option,
-    index=current_index,          # <--- 強制鎖定位置
-    key="mode_selector_ui",       # <--- UI 專用 key
-    on_change=on_mode_change      # <--- 綁定更新事件
+    index=current_index,      
+    key="mode_selector_ui",    
+    on_change=on_mode_change   
 )
-
-# 為了讓下方的過濾邏輯不用改，這裡確保 mode 變數與狀態同步
 mode = st.session_state.view_mode
+
+st.sidebar.markdown("---")
 
 # 科目篩選
 subject_list = list(set([q['subject'] for q in all_questions]))
-selected_subject = st.sidebar.radio("科目", subject_list)
+if subject_list:
+    selected_subject = st.sidebar.radio("科目", subject_list)
+else:
+    selected_subject = "無資料"
 
 # 年份篩選
 subject_data = [q for q in all_questions if q['subject'] == selected_subject]
@@ -208,7 +252,7 @@ for q in all_questions:
     if q['subject'] != selected_subject: continue
     if keyword and keyword not in q['question']: continue
     
-    # 使用固定代號來過濾
+    # 模式過濾
     if mode == MODE_FAV and q['id'] not in st.session_state['favorites']: continue
     if mode == MODE_MIS and q['id'] not in st.session_state['mistakes']: continue
     
@@ -237,14 +281,47 @@ if selected_category != "全部":
     base_sub_cats.insert(0, "全部")
     selected_sub_cat = st.sidebar.radio("細項", base_sub_cats, format_func=lambda x: f"{x} ({sub_counts.get(x,0)})" if x != "全部" else f"全部 ({len(sub_pool)})")
 
-# 最終篩選
+# 最終篩選結果
 final_questions = [q for q in current_pool if (selected_category == "全部" or q['category'] == selected_category) and (selected_sub_cat == "全部" or q['sub_category'] == selected_sub_cat)]
 
-# --- 主畫面 ---
+# ==========================================
+# 6. 主畫面顯示與 PDF 按鈕
+# ==========================================
 st.title(f"🔥 {selected_subject} 刷題區")
 st.write(f"題目數：{len(final_questions)}")
+
+# --- PDF 下載按鈕區塊 ---
+if final_questions:
+    col_dl1, col_dl2 = st.columns([0.7, 0.3])
+    with col_dl2:
+        # 設定標題名稱
+        if mode == MODE_FAV:
+            pdf_title = f"【收藏題本】{st.session_state['username']} - {selected_subject}"
+            btn_label = "🖨️ 匯出收藏題目 (PDF)"
+        elif mode == MODE_MIS:
+            pdf_title = f"【錯題本】{st.session_state['username']} - {selected_subject}"
+            btn_label = "🖨️ 匯出錯題複習 (PDF)"
+        else:
+            pdf_title = f"【刷題本】{selected_subject} 精選"
+            btn_label = "🖨️ 匯出當前題目 (PDF)"
+
+        if st.button(btn_label, use_container_width=True):
+            with st.spinner("正在排版印刷中..."):
+                pdf_bytes = create_pdf(final_questions, pdf_title)
+                
+                if pdf_bytes:
+                    st.download_button(
+                        label="📥 點擊下載 PDF",
+                        data=pdf_bytes,
+                        file_name=f"{pdf_title}.pdf",
+                        mime="application/pdf"
+                    )
+                else:
+                    st.error("❌ 錯誤：找不到字型檔 (font.ttf)，無法生成 PDF。")
+
 st.markdown("---")
 
+# 顯示提示訊息
 if not final_questions:
     if mode == MODE_MIS:
         st.success("🎉 太棒了！目前的篩選範圍內沒有錯題！")
@@ -253,43 +330,47 @@ if not final_questions:
     else:
         st.warning("⚠️ 沒有符合條件的題目")
 
+# 顯示題目迴圈
 for q in final_questions:
     q_label = f"{q['year']}#{str(q['id'])[-2:]}"
     
-    # 使用 container 包住每一題
     with st.container():
         col_star, col_q = st.columns([0.08, 0.92])
         
         with col_star:
             is_fav = q['id'] in st.session_state['favorites']
             btn_label = "⭐" if is_fav else "☆"
+            # 注意：這裡使用 key 確保按鈕獨立
             if st.button(btn_label, key=f"fav_{q['id']}"):
                 if is_fav:
                     st.session_state['favorites'].discard(q['id'])
                 else:
                     st.session_state['favorites'].add(q['id'])
                 
-                # 更新雲端並重整頁面，因為有 key 鎖定，所以重整後會留在原模式
                 save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
                 st.rerun()
 
         with col_q:
             st.markdown(f"### **[{q_label}]** {q['question']}")
+            
+            # 選項顯示
             user_answer = st.radio("選項", q['options'], key=f"q_{q['id']}", label_visibility="collapsed", index=None)
             
             if user_answer:
+                # 取得選項的第一個字元 (A, B, C, D)
                 ans_char = user_answer.replace("(", "").replace(")", "").replace(".", "").strip()[0]
+                
                 if ans_char == q['answer']:
                     st.success(f"✅ 正確！")
                     
-                    # 如果是在「錯題模式」答對，移除該題並重整
+                    # 錯題模式下，答對自動移除並重整
                     if mode == MODE_MIS and q['id'] in st.session_state['mistakes']:
                         st.session_state['mistakes'].discard(q['id'])
                         save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
-                        # 重整後，頁面會刷新，該題會消失，但模式依然是「錯題複習」
                         st.rerun()
                 else:
                     st.error(f"❌ 錯誤，答案是 {q['answer']}")
+                    # 答錯自動加入錯題
                     if q['id'] not in st.session_state['mistakes']:
                         st.session_state['mistakes'].add(q['id'])
                         save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
