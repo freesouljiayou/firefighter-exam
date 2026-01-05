@@ -1,4 +1,5 @@
 streamlit
-st-gsheets-connection
+streamlit-gsheets-connection
 pandas
+fpdf2
 Pillow
