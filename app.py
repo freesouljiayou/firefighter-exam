@@ -2,47 +2,40 @@ import streamlit as st
 import json
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+from PIL import Image 
 
 # ==========================================
 # 0. 網頁基礎設定
 # ==========================================
-from PIL import Image  # 1. 記得引入圖片處理套件
-
-# 1. 讀取圖片
-icon_image = Image.open("logo.png") 
-
-# 2. 設定 page_icon 為讀取到的圖片變數
-st.set_page_config(page_title="升等考 刑法與消防法規", page_icon=icon_image, layout="wide")
+try:
+    icon_image = Image.open("logo.png") 
+    st.set_page_config(page_title="升等考 刑法與消防法規", page_icon=icon_image, layout="wide")
+except:
+    st.set_page_config(page_title="升等考 刑法與消防法規", page_icon="🚒", layout="wide")
 
 # ==========================================
-# 1. Google Sheets 資料庫功能 (核心新功能)
+# 1. Google Sheets 資料庫功能
 # ==========================================
 def get_user_data(username):
     """從 Google Sheet 讀取該使用者的資料"""
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # 讀取全部資料，不快取 (確保拿到最新的)
         df = conn.read(ttl=0)
         
-        # 確保必要的欄位存在，如果沒有就建立空的
         expected_cols = ['Username', 'Favorites', 'Mistakes']
         if df.empty or not all(col in df.columns for col in expected_cols):
             df = pd.DataFrame(columns=expected_cols)
 
-        # 搜尋該使用者的資料
         user_row = df[df['Username'] == username]
         
         if not user_row.empty:
-            # 如果有資料，解析 JSON 字串變回集合 (Set)
             fav_str = str(user_row.iloc[0]['Favorites'])
             mis_str = str(user_row.iloc[0]['Mistakes'])
             
-            # 處理空值或字串轉換
             fav_set = set(json.loads(fav_str)) if fav_str and fav_str != 'nan' else set()
             mis_set = set(json.loads(mis_str)) if mis_str and mis_str != 'nan' else set()
             return fav_set, mis_set
         else:
-            # 如果是新使用者，回傳空的集合
             return set(), set()
     except Exception as e:
         st.error(f"連線讀取失敗：{e}")
@@ -54,17 +47,13 @@ def save_user_data(username, fav_set, mis_set):
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(ttl=0)
         
-        # 轉換集合為 JSON 字串以便儲存
         fav_json = json.dumps(list(fav_set))
         mis_json = json.dumps(list(mis_set))
         
-        # 檢查使用者是否已在資料表中
         if username in df['Username'].values:
-            # 更新現有資料
             df.loc[df['Username'] == username, 'Favorites'] = fav_json
             df.loc[df['Username'] == username, 'Mistakes'] = mis_json
         else:
-            # 新增一筆資料
             new_row = pd.DataFrame({
                 'Username': [username], 
                 'Favorites': [fav_json], 
@@ -72,11 +61,10 @@ def save_user_data(username, fav_set, mis_set):
             })
             df = pd.concat([df, new_row], ignore_index=True)
             
-        # 寫回 Google Sheet
         conn.update(data=df)
         
     except Exception as e:
-        st.warning(f"自動存檔失敗 (請檢查網路或權限)：{e}")
+        st.warning(f"自動存檔失敗：{e}")
 
 # ==========================================
 # 2. 登入驗證功能
@@ -87,9 +75,15 @@ def check_password():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.header("🔒 消防升等考題庫 - 雲端版")
+        # ✅ 修改需求 1：更改標題名稱
+        st.header("🔒 升等考 刑法與消防法規 - 雲端版")
         
-        user_list = list(st.secrets["passwords"].keys())
+        try:
+            user_list = list(st.secrets["passwords"].keys())
+        except:
+            st.error("尚未設定 Secrets，請檢查 .streamlit/secrets.toml")
+            st.stop()
+
         selected_user = st.selectbox("請選擇登入人員", user_list)
         password_input = st.text_input("請輸入密碼", type="password")
         
@@ -97,9 +91,8 @@ def check_password():
             correct_password = st.secrets["passwords"][selected_user]
             if password_input == correct_password:
                 st.session_state["password_correct"] = True
-                st.session_state["username"] = selected_user # 記住是誰登入的
+                st.session_state["username"] = selected_user
                 
-                # --- 登入成功時，立刻從雲端載入進度 ---
                 with st.spinner("☁️ 正在從雲端下載您的進度..."):
                     f_data, m_data = get_user_data(selected_user)
                     st.session_state['favorites'] = f_data
@@ -117,13 +110,11 @@ if not check_password():
 # 3. 題庫主程式
 # ==========================================
 
-# 確保 session_state 初始化
 if 'favorites' not in st.session_state:
     st.session_state['favorites'] = set()
 if 'mistakes' not in st.session_state:
     st.session_state['mistakes'] = set()
 
-# 讀取題目 JSON
 @st.cache_data
 def load_questions():
     with open('questions.json', 'r', encoding='utf-8') as f:
@@ -138,7 +129,6 @@ except FileNotFoundError:
 # --- 側邊欄 ---
 st.sidebar.header(f"👤 {st.session_state['username']} 的戰情室")
 
-# 手動存檔按鈕 (怕自動存檔沒跑)
 if st.sidebar.button("💾 手動雲端存檔"):
     save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
     st.sidebar.success("✅ 已上傳雲端！")
@@ -146,14 +136,62 @@ if st.sidebar.button("💾 手動雲端存檔"):
 keyword = st.sidebar.text_input("🔍 搜尋關鍵字")
 st.sidebar.markdown("---")
 
-mode = st.sidebar.radio("模式", ["一般刷題", "⭐ 題目收藏", "❌ 錯題複習"])
+# ==================================================
+# ✅ 修改需求 2：解決頁面跳動的核心邏輯
+# ==================================================
 
-if mode == "⭐ 題目收藏":
-    st.sidebar.caption(f"收藏數：{len(st.session_state['favorites'])}")
-elif mode == "❌ 錯題複習":
-    st.sidebar.caption(f"錯題數：{len(st.session_state['mistakes'])}")
+# 1. 定義固定的「內部代碼」 (這些是電腦看的，永遠不會變)
+MODE_NORMAL = "normal"
+MODE_FAV = "fav"
+MODE_MIS = "mis"
 
-st.sidebar.markdown("---")
+# 2. 定義「翻譯機」函數 (負責把代碼變成我們要的文字+數字)
+def format_mode_option(option_key):
+    if option_key == MODE_NORMAL:
+        return "一般刷題"
+    elif option_key == MODE_FAV:
+        return f"⭐ 題目收藏 ({len(st.session_state['favorites'])})"
+    elif option_key == MODE_MIS:
+        return f"❌ 錯題複習 ({len(st.session_state['mistakes'])})"
+    return option_key
+
+# 3. 建立 Radio 按鈕
+# 注意：options 這裡放的是固定的代碼 [MODE_NORMAL, MODE_FAV, MODE_MIS]
+# format_func 負責顯示文字，key 負責鎖定狀態
+# ==================================================
+# 修正版 Radio 按鈕邏輯 (解決跳頁問題)
+# ==================================================
+
+# 1. 確保 session_state 中有一個獨立變數來記錄當前模式
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = MODE_NORMAL
+
+# 2. 定義 Callback：當使用者「手動」點擊 Radio 時，更新變數
+def on_mode_change():
+    st.session_state.view_mode = st.session_state.mode_selector_ui
+
+# 3. 計算目前的 index
+# 這是關鍵！即使文字標籤變了，只要 index 指向同一個位置，它就不會跳掉
+options = [MODE_NORMAL, MODE_FAV, MODE_MIS]
+try:
+    current_index = options.index(st.session_state.view_mode)
+except ValueError:
+    current_index = 0
+    st.session_state.view_mode = MODE_NORMAL
+
+# 4. 建立 Radio
+# 注意：這裡的 key 改名為 _ui，只負責介面互動，邏輯判斷依賴 st.session_state.view_mode
+mode = st.sidebar.radio(
+    "模式", 
+    options, 
+    format_func=format_mode_option,
+    index=current_index,          # <--- 強制鎖定位置
+    key="mode_selector_ui",       # <--- UI 專用 key
+    on_change=on_mode_change      # <--- 綁定更新事件
+)
+
+# 為了讓下方的過濾邏輯不用改，這裡確保 mode 變數與狀態同步
+mode = st.session_state.view_mode
 
 # 科目篩選
 subject_list = list(set([q['subject'] for q in all_questions]))
@@ -169,8 +207,11 @@ current_pool = []
 for q in all_questions:
     if q['subject'] != selected_subject: continue
     if keyword and keyword not in q['question']: continue
-    if mode == "⭐ 題目收藏" and q['id'] not in st.session_state['favorites']: continue
-    if mode == "❌ 錯題複習" and q['id'] not in st.session_state['mistakes']: continue
+    
+    # 使用固定代號來過濾
+    if mode == MODE_FAV and q['id'] not in st.session_state['favorites']: continue
+    if mode == MODE_MIS and q['id'] not in st.session_state['mistakes']: continue
+    
     if q['year'] not in selected_years: continue
     current_pool.append(q)
 
@@ -205,41 +246,54 @@ st.write(f"題目數：{len(final_questions)}")
 st.markdown("---")
 
 if not final_questions:
-    st.warning("⚠️ 沒有符合條件的題目")
+    if mode == MODE_MIS:
+        st.success("🎉 太棒了！目前的篩選範圍內沒有錯題！")
+    elif mode == MODE_FAV:
+        st.warning("⚠️ 你還沒有收藏任何題目喔！")
+    else:
+        st.warning("⚠️ 沒有符合條件的題目")
 
 for q in final_questions:
     q_label = f"{q['year']}#{str(q['id'])[-2:]}"
-    col_star, col_q = st.columns([0.08, 0.92])
     
-    with col_star:
-        is_fav = q['id'] in st.session_state['favorites']
-        if st.button("⭐" if is_fav else "☆", key=f"fav_{q['id']}"):
-            if is_fav:
-                st.session_state['favorites'].discard(q['id'])
-            else:
-                st.session_state['favorites'].add(q['id'])
-            # 觸發雲端存檔
-            save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
-            st.rerun()
-
-    with col_q:
-        st.markdown(f"### **[{q_label}]** {q['question']}")
-        user_answer = st.radio("選項", q['options'], key=f"q_{q['id']}", label_visibility="collapsed", index=None)
+    # 使用 container 包住每一題
+    with st.container():
+        col_star, col_q = st.columns([0.08, 0.92])
         
-        if user_answer:
-            ans_char = user_answer.replace("(", "").replace(")", "").replace(".", "").strip()[0]
-            if ans_char == q['answer']:
-                st.success(f"✅ 正確！")
-                if mode == "❌ 錯題複習" and q['id'] in st.session_state['mistakes']:
-                    st.session_state['mistakes'].discard(q['id'])
-                    save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
-                    st.rerun()
-            else:
-                st.error(f"❌ 錯誤，答案是 {q['answer']}")
-                if q['id'] not in st.session_state['mistakes']:
-                    st.session_state['mistakes'].add(q['id'])
-                    save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
+        with col_star:
+            is_fav = q['id'] in st.session_state['favorites']
+            btn_label = "⭐" if is_fav else "☆"
+            if st.button(btn_label, key=f"fav_{q['id']}"):
+                if is_fav:
+                    st.session_state['favorites'].discard(q['id'])
+                else:
+                    st.session_state['favorites'].add(q['id'])
+                
+                # 更新雲端並重整頁面，因為有 key 鎖定，所以重整後會留在原模式
+                save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
+                st.rerun()
+
+        with col_q:
+            st.markdown(f"### **[{q_label}]** {q['question']}")
+            user_answer = st.radio("選項", q['options'], key=f"q_{q['id']}", label_visibility="collapsed", index=None)
             
-            with st.expander("查看詳解"):
-                st.info(q['explanation'])
-    st.markdown("---")
+            if user_answer:
+                ans_char = user_answer.replace("(", "").replace(")", "").replace(".", "").strip()[0]
+                if ans_char == q['answer']:
+                    st.success(f"✅ 正確！")
+                    
+                    # 如果是在「錯題模式」答對，移除該題並重整
+                    if mode == MODE_MIS and q['id'] in st.session_state['mistakes']:
+                        st.session_state['mistakes'].discard(q['id'])
+                        save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
+                        # 重整後，頁面會刷新，該題會消失，但模式依然是「錯題複習」
+                        st.rerun()
+                else:
+                    st.error(f"❌ 錯誤，答案是 {q['answer']}")
+                    if q['id'] not in st.session_state['mistakes']:
+                        st.session_state['mistakes'].add(q['id'])
+                        save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
+                
+                with st.expander("查看詳解"):
+                    st.info(q['explanation'])
+        st.markdown("---")
