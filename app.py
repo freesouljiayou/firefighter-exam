@@ -29,7 +29,8 @@ def set_apple_icon(image_url):
     st.markdown(icon_html, unsafe_allow_html=True)
 
 # 👇 這是修正後的網址 (已移除 refs/heads/，確保能直接讀取圖片)
-apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png"
+# 👇 加入 ?v=1 參數，強制 iPhone 重新抓取圖片，不使用舊快取
+apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png?v=1"
 
 # 執行設定
 set_apple_icon(apple_icon_url)
