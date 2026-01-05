@@ -16,6 +16,27 @@ except:
     st.set_page_config(page_title="升等考 刑法與消防法規", page_icon="🚒", layout="wide")
 
 # ==========================================
+# 0.5 設定 iPhone 主畫面圖示 (新增這段)
+# ==========================================
+def set_apple_icon(image_url):
+    """
+    強迫插入 iOS 專用的 apple-touch-icon 標籤
+    """
+    icon_html = f"""
+    <head>
+        <link rel="apple-touch-icon" href="{image_url}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{image_url}">
+    </head>
+    """
+    st.markdown(icon_html, unsafe_allow_html=True)
+
+# 👇 請將這裡的網址換成你剛剛複製的 GitHub Raw 連結
+# 例如: "https://raw.githubusercontent.com/你的帳號/你的專案/main/ios_icon.png"
+apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/refs/heads/main/ios_icon.png.png"
+
+# 執行設定
+set_apple_icon(apple_icon_url)
+# ==========================================
 # 1. Google Sheets 資料庫功能
 # ==========================================
 def get_user_data(username):
