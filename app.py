@@ -26,16 +26,10 @@ def set_apple_icon(image_url):
     <link rel="apple-touch-icon" href="{image_url}">
     <link rel="apple-touch-icon" sizes="180x180" href="{image_url}">
     """
-    # 這裡移除了 <head> 標籤，因為 st.markdown 會被放在 body 內，
-    # 現代瀏覽器還是讀得到，但包在 <head> 裡反而不符合 HTML 規範
     st.markdown(icon_html, unsafe_allow_html=True)
 
-# 👇 這是幫你修正後的網址
-# 假設你的檔名是 ios_icon.png (只有一個 png)
+# 👇 這是修正後的網址 (已移除 refs/heads/，確保能直接讀取圖片)
 apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png"
-
-# 如果你確定你的檔名真的叫 "ios_icon.png.png" (有兩個 png)，請用下面這行：
-# apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png.png"
 
 # 執行設定
 set_apple_icon(apple_icon_url)
