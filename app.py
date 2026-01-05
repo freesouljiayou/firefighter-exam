@@ -7,29 +7,23 @@ import io
 from fpdf import FPDF 
 
 # ==========================================
-# 0.5 iPhone 主畫面圖示 (JS 暴力注入版)
+# 0. 網頁基礎設定 (改用這裡設定圖示)
 # ==========================================
-def inject_apple_icon():
-    # 這是你確認過可以打開的圖片網址
-    icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png"
-    
-    # 這段 JS 會直接找到網頁的 <head>，然後把 <link> 標籤硬塞進去
-    # 我們加了 ?v=2 來騙過 iPhone 的快取
-    js_code = f"""
-    <script>
-        (function() {{
-            var link = document.querySelector("link[rel*='apple-touch-icon']") || document.createElement('link');
-            link.type = 'image/png';
-            link.rel = 'apple-touch-icon';
-            link.href = '{icon_url}?v=2';
-            document.getElementsByTagName('head')[0].appendChild(link);
-        }})();
-    </script>
-    """
-    st.markdown(js_code, unsafe_allow_html=True)
+# iPhone 會嘗試抓取這裡設定的 page_icon
+# 請確保你的資料夾裡有 'ios_icon.png' (那個有底色、不透明的版本)
+try:
+    # 直接讀取 ios_icon.png 當作全站圖示
+    icon_image = Image.open("ios_icon.png") 
+    st.set_page_config(
+        page_title="升等考 刑法與消防法規", 
+        page_icon=icon_image,  # <--- 關鍵：這裡餵給它高品質圖片
+        layout="wide"
+    )
+except FileNotFoundError:
+    # 萬一找不到圖片的備用方案
+    st.set_page_config(page_title="升等考 刑法與消防法規", page_icon="🚒", layout="wide")
 
-# 執行注入
-inject_apple_icon()
+# (注意：原本那個 0.5 def set_apple_icon... 的整段程式碼請直接刪除，因為沒用)
 
 # ==========================================
 # 1. Google Sheets 資料庫功能
