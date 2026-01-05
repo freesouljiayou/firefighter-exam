@@ -6,7 +6,13 @@ from streamlit_gsheets import GSheetsConnection
 # ==========================================
 # 0. 網頁基礎設定
 # ==========================================
-st.set_page_config(page_title="升等考 刑法與消防法規", layout="wide")
+from PIL import Image  # 1. 記得引入圖片處理套件
+
+# 1. 讀取圖片
+icon_image = Image.open("logo.png") 
+
+# 2. 設定 page_icon 為讀取到的圖片變數
+st.set_page_config(page_title="升等考 刑法與消防法規", page_icon=icon_image, layout="wide")
 
 # ==========================================
 # 1. Google Sheets 資料庫功能 (核心新功能)
