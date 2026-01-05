@@ -5,6 +5,7 @@ from streamlit_gsheets import GSheetsConnection
 from PIL import Image 
 import io
 from fpdf import FPDF # 匯出 PDF 需使用
+import base64
 
 # ==========================================
 # 0. 網頁基礎設定
@@ -16,24 +17,37 @@ except:
     st.set_page_config(page_title="升等考 刑法與消防法規", page_icon="🚒", layout="wide")
 
 # ==========================================
-# 0.5 設定 iPhone 主畫面圖示 (修正版)
+# 0.5 設定 iPhone 主畫面圖示 (Base64 嵌入版 - 終極解法)
 # ==========================================
-def set_apple_icon(image_url):
+def set_apple_icon_embedded(file_path):
     """
-    強迫插入 iOS 專用的 apple-touch-icon 標籤
+    直接讀取本地檔案並轉成 Base64 編碼嵌入，
+    避免因為網路請求或 GitHub 連結問題導致圖示無法顯示。
     """
-    icon_html = f"""
-    <link rel="apple-touch-icon" href="{image_url}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{image_url}">
-    """
-    st.markdown(icon_html, unsafe_allow_html=True)
+    try:
+        # 1. 以二進位模式讀取圖片
+        with open(file_path, "rb") as f:
+            data = f.read()
+        
+        # 2. 轉成 Base64 字串
+        b64_icon = base64.b64encode(data).decode("utf-8")
+        
+        # 3. 建立 HTML 標籤 (包含 apple-touch-icon 與 shortcut icon)
+        # 注意：我們同時設定兩種標籤，確保相容性
+        icon_html = f"""
+        <link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,{b64_icon}">
+        <link rel="shortcut icon" href="data:image/png;base64,{b64_icon}">
+        """
+        
+        # 4. 寫入網頁
+        st.markdown(icon_html, unsafe_allow_html=True)
+        
+    except FileNotFoundError:
+        st.error(f"⚠️ 找不到圖示檔案：{file_path}，請確認檔名是否正確。")
 
-# 👇 這是修正後的網址 (已移除 refs/heads/，確保能直接讀取圖片)
-# 👇 加入 ?v=1 參數，強制 iPhone 重新抓取圖片，不使用舊快取
-apple_icon_url = "https://raw.githubusercontent.com/freesouljiayou/firefighter-exam/main/ios_icon.png?v=1"
+# 執行設定 (請確認你的資料夾內真的有 ios_icon.png 這個檔案)
+set_apple_icon_embedded("ios_icon.png")
 
-# 執行設定
-set_apple_icon(apple_icon_url)
 # ==========================================
 # 1. Google Sheets 資料庫功能
 # ==========================================
