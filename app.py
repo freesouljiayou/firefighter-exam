@@ -147,50 +147,45 @@ def create_pdf(questions, title):
     try:
         pdf.add_font('ChineseFont', '', 'font.ttf')
         pdf.set_font('ChineseFont', '', 12)
-    except:
+    except Exception as e:
+        st.error(f"❌ PDF 字型載入失敗: {e}")
         return None
 
-    # 標題
-    pdf.set_font_size(16)
-    pdf.cell(0, 10, title, ln=True, align='C')
-    pdf.ln(5)
-    
-    # 內容設定
-    pdf.set_font_size(11)
-    
-    for idx, q in enumerate(questions):
-        # 1. 檢查剩餘空間，如果快到底部了就換頁 (預防題目被切斷)
-        if pdf.get_y() > 250:
-            pdf.add_page()
-
-        # 2. 寫入題目
-        q_year = q.get('year', '')
-        q_id = str(q.get('id', ''))
-        q_content = q.get('question', '')
-        question_text = f"{idx + 1}. [{q_year}#{q_id[-2:]}] {q_content}"
-        pdf.multi_cell(0, 7, question_text) # 降低行高至 7
-        
-        # 3. 逐一寫入選項 (解決版型跑掉的關鍵)
-        options = q.get('options', [])
-        pdf.ln(1) # 題目與選項間微小間隔
-        for opt in options:
-            pdf.set_x(15) # 左側縮排 15mm
-            # 使用 multi_cell 確保單個選項太長時也會自動在縮排範圍內換行
-            pdf.multi_cell(0, 7, opt) 
-        
-        # 4. 寫入正解 (放在選項下方，稍微留白)
-        pdf.ln(1)
-        pdf.set_x(15)
-        pdf.set_text_color(150, 150, 150) # 灰色
-        ans = q.get('answer', '')
-        pdf.cell(0, 7, f"👉 正解: ({ans})", ln=True)
-        pdf.set_text_color(0, 0, 0) # 恢復黑色
-        
-        pdf.ln(5) # 題與題之間的間距
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # 畫一條淡淡的分隔線 (可選)
+    try:
+        pdf.set_font_size(16)
+        # 使用 fpdf2 的標準換行控制
+        pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(5)
+        
+        pdf.set_font_size(11)
+        for idx, q in enumerate(questions):
+            if pdf.get_y() > 250:
+                pdf.add_page()
 
-    return bytes(pdf.output())
+            q_text = f"{idx + 1}. [{q.get('year')}#{str(q.get('id'))[-2:]}] {q.get('question')}"
+            pdf.multi_cell(0, 7, q_text, new_x="LMARGIN", new_y="NEXT")
+            
+            pdf.ln(1)
+            for opt in q.get('options', []):
+                pdf.set_x(15)
+                pdf.multi_cell(0, 7, opt, new_x="LMARGIN", new_y="NEXT")
+            
+            pdf.ln(1)
+            pdf.set_x(15)
+            pdf.set_text_color(150, 150, 150)
+            pdf.cell(0, 7, f"👉 正解: ({q.get('answer')})", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            
+            pdf.ln(5)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(5)
+            
+        # 【關鍵修正處】確保回傳 bytes 格式
+        return bytes(pdf.output()) 
+        
+    except Exception as e:
+        st.error(f"❌ PDF 排版出錯: {e}")
+        return None
 
 # ==========================================
 # 5. 側邊欄與篩選邏輯
