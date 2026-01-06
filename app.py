@@ -7,29 +7,39 @@ import io
 from fpdf import FPDF 
 
 # ==========================================
-# 0. 網頁基礎設定 (改用這裡設定圖示)
+# 0. 網頁基礎設定
 # ==========================================
-# iPhone 會嘗試抓取這裡設定的 page_icon
-# 請確保你的資料夾裡有 'ios_icon.png' (那個有底色、不透明的版本)
 try:
-    # 直接讀取 ios_icon.png 當作全站圖示
     icon_image = Image.open("ios_icon.png") 
     st.set_page_config(
         page_title="升等考 刑法與消防法規", 
-        page_icon=icon_image,  # <--- 關鍵：這裡餵給它高品質圖片
+        page_icon=icon_image, 
         layout="wide"
     )
 except FileNotFoundError:
-    # 萬一找不到圖片的備用方案
     st.set_page_config(page_title="升等考 刑法與消防法規", page_icon="🚒", layout="wide")
 
-# (注意：原本那個 0.5 def set_apple_icon... 的整段程式碼請直接刪除，因為沒用)
+# ==========================================
+# 1. 核心載入資料 (先讀取題庫，供後續清洗紀錄使用)
+# ==========================================
+@st.cache_data
+def load_questions():
+    with open('questions.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+try:
+    all_questions = load_questions()
+    # 建立目前題庫中所有合法 ID 的集合
+    ALL_VALID_IDS = {q['id'] for q in all_questions}
+except FileNotFoundError:
+    st.error("❌ 找不到 questions.json 檔案！")
+    st.stop()
 
 # ==========================================
-# 1. Google Sheets 資料庫功能
+# 2. Google Sheets 資料庫功能
 # ==========================================
 def get_user_data(username):
-    """從 Google Sheet 讀取該使用者的資料"""
+    """從 Google Sheet 讀取資料，並自動剔除不存在於目前題庫中的舊 ID"""
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(ttl=0)
@@ -44,13 +54,23 @@ def get_user_data(username):
             fav_str = str(user_row.iloc[0]['Favorites'])
             mis_str = str(user_row.iloc[0]['Mistakes'])
             
-            fav_set = set(json.loads(fav_str)) if fav_str and fav_str != 'nan' else set()
-            mis_set = set(json.loads(mis_str)) if mis_str and mis_str != 'nan' else set()
-            return fav_set, mis_set
+            # 解析雲端紀錄
+            raw_favs = set(json.loads(fav_str)) if fav_str and fav_str != 'nan' else set()
+            raw_mists = set(json.loads(mis_str)) if mis_str and mis_str != 'nan' else set()
+            
+            # --- 一勞永逸的關鍵：交集過濾 ---
+            clean_favs = raw_favs.intersection(ALL_VALID_IDS)
+            clean_mists = raw_mists.intersection(ALL_VALID_IDS)
+            
+            # 如果發現有髒資料被濾掉，主動回寫雲端以校準數量顯示
+            if len(clean_favs) != len(raw_favs) or len(clean_mists) != len(raw_mists):
+                save_user_data(username, clean_favs, clean_mists)
+                
+            return clean_favs, clean_mists
         else:
             return set(), set()
     except Exception as e:
-        st.error(f"連線讀取失敗：{e}")
+        st.error(f"雲端讀取失敗：{e}")
         return set(), set()
 
 def save_user_data(username, fav_set, mis_set):
@@ -79,7 +99,7 @@ def save_user_data(username, fav_set, mis_set):
         st.warning(f"自動存檔失敗：{e}")
 
 # ==========================================
-# 2. 登入驗證功能
+# 3. 登入驗證功能
 # ==========================================
 def check_password():
     if st.session_state.get("password_correct", False):
@@ -87,7 +107,7 @@ def check_password():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.header("🔒 升等考 刑法與消防法規 - 雲端版")
+        st.header("🔒 刑法與消防法規 - 雲端版")
         
         try:
             user_list = list(st.secrets["passwords"].keys())
@@ -104,7 +124,7 @@ def check_password():
                 st.session_state["password_correct"] = True
                 st.session_state["username"] = selected_user
                 
-                with st.spinner("☁️ 正在從雲端下載您的進度..."):
+                with st.spinner("☁️ 正在下載進度並自動校準舊紀錄..."):
                     f_data, m_data = get_user_data(selected_user)
                     st.session_state['favorites'] = f_data
                     st.session_state['mistakes'] = m_data
@@ -117,25 +137,11 @@ def check_password():
 if not check_password():
     st.stop()
 
-# ==========================================
-# 3. 核心邏輯與載入資料
-# ==========================================
-
+# 初始化狀態
 if 'favorites' not in st.session_state:
     st.session_state['favorites'] = set()
 if 'mistakes' not in st.session_state:
     st.session_state['mistakes'] = set()
-
-@st.cache_data
-def load_questions():
-    with open('questions.json', 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-try:
-    all_questions = load_questions()
-except FileNotFoundError:
-    st.error("❌ 找不到 questions.json 檔案！")
-    st.stop()
 
 # ==========================================
 # 4. PDF 匯出功能函數
@@ -153,7 +159,7 @@ def create_pdf(questions, title):
 
     try:
         pdf.set_font_size(16)
-        # 使用 fpdf2 的標準換行控制
+        # 使用 fpdf2 換行控制
         pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(5)
         
@@ -180,7 +186,6 @@ def create_pdf(questions, title):
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(5)
             
-        # 【關鍵修正處】確保回傳 bytes 格式
         return bytes(pdf.output()) 
         
     except Exception as e:
@@ -194,23 +199,19 @@ st.sidebar.header(f"👤 {st.session_state['username']} 的戰情室")
 
 if st.sidebar.button("💾 手動雲端存檔"):
     save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
-    st.sidebar.success("✅ 已上傳雲端！")
+    st.sidebar.success("✅ 已同步至雲端！")
 
 keyword = st.sidebar.text_input("🔍 搜尋關鍵字")
 st.sidebar.markdown("---")
 
-# --- 修正版 Radio 按鈕邏輯 (解決跳頁問題) ---
 MODE_NORMAL = "normal"
 MODE_FAV = "fav"
 MODE_MIS = "mis"
 
 def format_mode_option(option_key):
-    if option_key == MODE_NORMAL:
-        return "一般刷題"
-    elif option_key == MODE_FAV:
-        return f"⭐ 題目收藏 ({len(st.session_state['favorites'])})"
-    elif option_key == MODE_MIS:
-        return f"❌ 錯題複習 ({len(st.session_state['mistakes'])})"
+    if option_key == MODE_NORMAL: return "一般刷題"
+    elif option_key == MODE_FAV: return f"⭐ 題目收藏 ({len(st.session_state['favorites'])})"
+    elif option_key == MODE_MIS: return f"❌ 錯題複習 ({len(st.session_state['mistakes'])})"
     return option_key
 
 if 'view_mode' not in st.session_state:
@@ -224,9 +225,7 @@ try:
     current_index = options.index(st.session_state.view_mode)
 except ValueError:
     current_index = 0
-    st.session_state.view_mode = MODE_NORMAL
 
-# 建立 Radio
 mode_selection = st.sidebar.radio(
     "模式", 
     options, 
@@ -239,37 +238,31 @@ mode = st.session_state.view_mode
 
 st.sidebar.markdown("---")
 
-# 科目篩選
+# 科目與年份篩選
 subject_list = list(set([q['subject'] for q in all_questions]))
-if subject_list:
-    selected_subject = st.sidebar.radio("科目", subject_list)
-else:
-    selected_subject = "無資料"
+selected_subject = st.sidebar.radio("科目", subject_list) if subject_list else "無資料"
 
-# 年份篩選
 subject_data = [q for q in all_questions if q['subject'] == selected_subject]
 years_available = sorted(list(set([q['year'] for q in subject_data])), reverse=True)
 selected_years = [y for y in years_available if st.sidebar.checkbox(f"{y} 年", value=True)]
 
-# 資料池篩選
+# 資料池過濾
 current_pool = []
 for q in all_questions:
     if q['subject'] != selected_subject: continue
+    if q['year'] not in selected_years: continue
     if keyword and keyword not in q['question']: continue
-    
-    # 模式過濾
     if mode == MODE_FAV and q['id'] not in st.session_state['favorites']: continue
     if mode == MODE_MIS and q['id'] not in st.session_state['mistakes']: continue
-    
-    if q['year'] not in selected_years: continue
     current_pool.append(q)
 
 # 分類篩選
-cat_counts = {q['category']: 0 for q in subject_data}
+cat_counts = {cat: 0 for cat in set([q.get('category', '未分類') for q in subject_data])}
 for q in current_pool:
-    cat_counts[q['category']] = cat_counts.get(q['category'], 0) + 1
+    cat = q.get('category', '未分類')
+    cat_counts[cat] = cat_counts.get(cat, 0) + 1
 
-categories = sorted(list(set([q['category'] for q in subject_data])))
+categories = sorted(list(cat_counts.keys()))
 categories.insert(0, "全部")
 
 selected_category = st.sidebar.radio("領域", categories, format_func=lambda x: f"{x} ({cat_counts.get(x,0)})" if x != "全部" else f"全部 ({len(current_pool)})")
@@ -278,16 +271,17 @@ selected_category = st.sidebar.radio("領域", categories, format_func=lambda x:
 selected_sub_cat = "全部"
 if selected_category != "全部":
     sub_pool = [q for q in current_pool if q['category'] == selected_category]
-    sub_counts = {}
+    sub_counts = {sub: 0 for sub in set([q.get('sub_category', '未分類') for q in subject_data if q.get('category') == selected_category])}
     for q in sub_pool:
-        sub_counts[q['sub_category']] = sub_counts.get(q['sub_category'], 0) + 1
+        sub = q.get('sub_category', '未分類')
+        sub_counts[sub] = sub_counts.get(sub, 0) + 1
     
-    base_sub_cats = sorted(list(set([q['sub_category'] for q in subject_data if q['category'] == selected_category])))
-    base_sub_cats.insert(0, "全部")
-    selected_sub_cat = st.sidebar.radio("細項", base_sub_cats, format_func=lambda x: f"{x} ({sub_counts.get(x,0)})" if x != "全部" else f"全部 ({len(sub_pool)})")
+    sub_categories = sorted(list(sub_counts.keys()))
+    sub_categories.insert(0, "全部")
+    selected_sub_cat = st.sidebar.radio("細項", sub_categories, format_func=lambda x: f"{x} ({sub_counts.get(x,0)})" if x != "全部" else f"全部 ({len(sub_pool)})")
 
-# 最終篩選結果
-final_questions = [q for q in current_pool if (selected_category == "全部" or q['category'] == selected_category) and (selected_sub_cat == "全部" or q['sub_category'] == selected_sub_cat)]
+# 最終名單
+final_questions = [q for q in current_pool if (selected_category == "全部" or q['category'] == selected_category) and (selected_sub_cat == "全部" or q.get('sub_category') == selected_sub_cat)]
 
 # ==========================================
 # 6. 主畫面顯示與 PDF 按鈕
@@ -295,11 +289,9 @@ final_questions = [q for q in current_pool if (selected_category == "全部" or 
 st.title(f"🔥 {selected_subject} 刷題區")
 st.write(f"題目數：{len(final_questions)}")
 
-# --- PDF 下載按鈕區塊 ---
 if final_questions:
     col_dl1, col_dl2 = st.columns([0.7, 0.3])
     with col_dl2:
-        # 設定標題名稱
         if mode == MODE_FAV:
             pdf_title = f"【收藏題本】{st.session_state['username']} - {selected_subject}"
             btn_label = "🖨️ 匯出收藏題目 (PDF)"
@@ -311,75 +303,50 @@ if final_questions:
             btn_label = "🖨️ 匯出當前題目 (PDF)"
 
         if st.button(btn_label, use_container_width=True):
-            with st.spinner("正在排版印刷中..."):
+            with st.spinner("排版中..."):
                 pdf_bytes = create_pdf(final_questions, pdf_title)
-                
                 if pdf_bytes:
-                    st.download_button(
-                        label="📥 點擊下載 PDF",
-                        data=pdf_bytes,
-                        file_name=f"{pdf_title}.pdf",
-                        mime="application/pdf"
-                    )
+                    st.download_button(label="📥 點擊下載 PDF", data=pdf_bytes, file_name=f"{pdf_title}.pdf", mime="application/pdf")
                 else:
-                    st.error("❌ 錯誤：找不到字型檔 (font.ttf)，無法生成 PDF。")
+                    st.error("❌ 錯誤：找不到字型檔 (font.ttf)。")
 
 st.markdown("---")
 
-# 顯示提示訊息
 if not final_questions:
-    if mode == MODE_MIS:
-        st.success("🎉 太棒了！目前的篩選範圍內沒有錯題！")
-    elif mode == MODE_FAV:
-        st.warning("⚠️ 你還沒有收藏任何題目喔！")
-    else:
-        st.warning("⚠️ 沒有符合條件的題目")
+    if mode == MODE_MIS: st.success("🎉 太棒了！目前的篩選範圍內沒有錯題！")
+    elif mode == MODE_FAV: st.warning("⚠️ 你還沒有收藏任何題目喔！")
+    else: st.warning("⚠️ 沒有符合條件的題目")
 
-# 顯示題目迴圈
+# 顯示題目
 for q in final_questions:
     q_label = f"{q['year']}#{str(q['id'])[-2:]}"
-    
     with st.container():
         col_star, col_q = st.columns([0.08, 0.92])
-        
         with col_star:
             is_fav = q['id'] in st.session_state['favorites']
-            btn_label = "⭐" if is_fav else "☆"
-            # 注意：這裡使用 key 確保按鈕獨立
-            if st.button(btn_label, key=f"fav_{q['id']}"):
-                if is_fav:
-                    st.session_state['favorites'].discard(q['id'])
-                else:
-                    st.session_state['favorites'].add(q['id'])
-                
+            if st.button("⭐" if is_fav else "☆", key=f"fav_{q['id']}"):
+                if is_fav: st.session_state['favorites'].discard(q['id'])
+                else: st.session_state['favorites'].add(q['id'])
                 save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
                 st.rerun()
 
         with col_q:
             st.markdown(f"### **[{q_label}]** {q['question']}")
-            
-            # 選項顯示
             user_answer = st.radio("選項", q['options'], key=f"q_{q['id']}", label_visibility="collapsed", index=None)
             
             if user_answer:
-                # 取得選項的第一個字元 (A, B, C, D)
                 ans_char = user_answer.replace("(", "").replace(")", "").replace(".", "").strip()[0]
-                
                 if ans_char == q['answer']:
                     st.success(f"✅ 正確！")
-                    
-                    # 錯題模式下，答對自動移除並重整
                     if mode == MODE_MIS and q['id'] in st.session_state['mistakes']:
                         st.session_state['mistakes'].discard(q['id'])
                         save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
                         st.rerun()
                 else:
                     st.error(f"❌ 錯誤，答案是 {q['answer']}")
-                    # 答錯自動加入錯題
                     if q['id'] not in st.session_state['mistakes']:
                         st.session_state['mistakes'].add(q['id'])
                         save_user_data(st.session_state['username'], st.session_state['favorites'], st.session_state['mistakes'])
-                
                 with st.expander("查看詳解"):
                     st.info(q['explanation'])
         st.markdown("---")
